@@ -255,7 +255,7 @@
 
   <div class="controls">
     <button id="btn-convert">⚡ Convert</button>
-    <button id="btn-copy">📋 Copy C#</button><span id="copy-toast">✔ Copied!</span>
+    <button id="btn-copy">📋 Copy C#</button><span id="copy-toast" role="status" aria-live="polite" aria-atomic="true">✔ Copied!</span>
     <button id="btn-clear">✕ Clear</button>
     <button id="btn-sample">Load Sample JSON</button>
 
@@ -280,7 +280,7 @@
         <span>JSON Input</span>
         <span class="lang-badge lang-json">JSON</span>
       </div>
-      <textarea id="json-input" spellcheck="false" placeholder='Paste your JSON here…&#10;&#10;{&#10;  "name": "Alice",&#10;  "age": 30&#10;}'></textarea>
+      <textarea id="json-input" spellcheck="false" title="Tip: Press Ctrl+Enter (Windows/Linux) or Cmd+Enter (macOS) to convert." placeholder='Paste your JSON here…&#10;&#10;{&#10;  "name": "Alice",&#10;  "age": 30&#10;}'></textarea>
     </div>
 
     <div class="panel">
@@ -288,7 +288,7 @@
         <span>C# Output</span>
         <span class="lang-badge lang-cs">C#</span>
       </div>
-      <div id="output">Click Convert to generate C# classes.</div>
+      <div id="output" role="region" aria-label="C# Output" aria-live="polite">Click Convert to generate C# classes.</div>
     </div>
   </div>
 
@@ -324,6 +324,67 @@ function toCSharpClassName(name) {
   return sanitizeIdentifier(toPascalCase(name));
 }
 
+// Returns true if v is a plain (non-null, non-array) object.
+function isPlainObject(v) {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
+// Returns the numeric "width" rank: double > long > int.
+function numericKind(n) {
+  if (!Number.isInteger(n)) return 2; // double
+  if (n > 2147483647 || n < -2147483648) return 1; // long
+  return 0; // int
+}
+
+// Merge an array of objects, using null for keys where value types conflict.
+// A null value in JSON is treated as "unknown type" and does not override an
+// already-known concrete type; once a conflict is recorded (null), it stays null.
+// Plain-object values are merged recursively; array values are unioned so that
+// all element types/properties from every occurrence are captured.
+function mergeObjects(objects) {
+  const result = {};
+  for (const obj of objects) {
+    for (const [key, value] of Object.entries(obj)) {
+      if (!(key in result)) {
+        result[key] = value;
+      } else {
+        const existing = result[key];
+        // If a conflict was already recorded, keep it as null.
+        if (existing === null) continue;
+        // A new null value doesn't change the inferred type of an existing value.
+        if (value === null) continue;
+
+        // Recursively merge plain objects to capture all nested properties.
+        if (isPlainObject(existing) && isPlainObject(value)) {
+          result[key] = mergeObjects([existing, value]);
+          continue;
+        }
+
+        // For arrays, union all elements so all item types/properties are captured.
+        if (Array.isArray(existing) && Array.isArray(value)) {
+          result[key] = existing.concat(value);
+          continue;
+        }
+
+        // For numbers, keep the value representing the wider numeric type.
+        // (result[key] is already `existing`; only update when the new value is wider.)
+        if (typeof existing === 'number' && typeof value === 'number') {
+          if (numericKind(value) > numericKind(existing)) result[key] = value;
+          continue;
+        }
+
+        const sameKind =
+          typeof existing === typeof value &&
+          Array.isArray(existing) === Array.isArray(value);
+        if (!sameKind) {
+          result[key] = null; // conflicting types → infer as object
+        }
+      }
+    }
+  }
+  return result;
+}
+
 // Infer the C# type for a JSON value.
 // classMap accumulates nested class definitions keyed by class name.
 function inferType(value, propertyName, classMap, useNullable) {
@@ -348,9 +409,25 @@ function inferType(value, propertyName, classMap, useNullable) {
     if (value.length === 0) {
       return 'List<object>';
     }
-    // Determine a common item type by checking all elements
+    // For arrays of objects, merge all items to capture all properties.
+    // Only use the object-item path when every non-null element is a plain object;
+    // mixed arrays (e.g. [{a:1}, 2]) fall through to the common-type logic below.
+    const nonNullItems = value.filter(el => el !== null && el !== undefined);
+    if (nonNullItems.length > 0 && nonNullItems.every(el => isPlainObject(el))) {
+      const merged = mergeObjects(nonNullItems);
+      const itemClassName = toCSharpClassName(propertyName + 'Item');
+      if (!classMap.has(itemClassName)) {
+        classMap.set(itemClassName, null);
+        const def = generateClass(itemClassName, merged, classMap, useNullable, false);
+        classMap.set(itemClassName, def);
+      }
+      return `List<${itemClassName}>`;
+    }
+    // Primitive/mixed items: determine a common type.
+    // Plain objects in a mixed array are treated as 'object' without generating a class,
+    // since this path is only reached when the array is not uniformly plain objects.
     const itemTypes = new Set(
-      value.map(el => inferType(el, propertyName + 'Item', classMap, useNullable))
+      value.map(el => isPlainObject(el) ? 'object' : inferType(el, propertyName + 'Item', classMap, useNullable))
     );
     const itemType = itemTypes.size === 1 ? itemTypes.values().next().value : 'object';
     return `List<${itemType}>`;
@@ -379,7 +456,7 @@ function generateClass(className, obj, classMap, useNullable, addAttr) {
 
   for (const [key, value] of Object.entries(obj)) {
     const propName = sanitizeIdentifier(toPascalCase(key));
-    const typeName = inferType(value, key, classMap, useNullable);
+    const typeName = inferType(value, className + propName, classMap, useNullable);
 
     if (addAttr) {
       lines.push(`    [JsonPropertyName("${key}")]`);
@@ -400,10 +477,10 @@ function convert(json, rootClassName, useNullable, addAttr) {
   // If root is an array, merge properties from all objects in the array
   let rootObj = json;
   if (Array.isArray(json)) {
-    const objects = json.filter(x => typeof x === 'object' && x !== null && !Array.isArray(x));
+    const objects = json.filter(x => isPlainObject(x));
     if (objects.length === 0) throw new Error('Array does not contain any objects to generate classes from.');
-    // Merge all object keys so no property is missed
-    rootObj = Object.assign({}, ...objects);
+    // Merge all object keys so no property is missed, with type-conflict detection
+    rootObj = mergeObjects(objects);
   }
 
   const classMap = new Map(); // name → definition string
@@ -426,10 +503,11 @@ function convert(json, rootClassName, useNullable, addAttr) {
   }
   if (rootEntry && rootEntry[1]) parts.push(rootEntry[1]);
 
-  if (addAttr) {
-    return 'using System.Text.Json.Serialization;\n\n' + parts.join('\n\n');
-  }
-  return parts.join('\n\n');
+  const output = parts.join('\n\n');
+  const usings = [];
+  if (output.includes('List<')) usings.push('using System.Collections.Generic;');
+  if (addAttr) usings.push('using System.Text.Json.Serialization;');
+  return usings.length > 0 ? usings.join('\n') + '\n\n' + output : output;
 }
 
 // ── DOM Wiring ──────────────────────────────────────────────────────
@@ -478,13 +556,45 @@ btnConvert.addEventListener('click', doConvert);
 btnCopy.addEventListener('click', () => {
   const text = outputEl.textContent;
   if (!text || outputEl.classList.contains('error-text')) return;
-  navigator.clipboard.writeText(text).then(() => {
-    copyToast.style.display = 'inline';
-    setTimeout(() => { copyToast.style.display = 'none'; }, 2000);
-  }).catch(() => {
+
+  // Prefer modern Clipboard API when available in a secure context.
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(text).then(() => {
+      copyToast.style.display = 'inline';
+      setTimeout(() => { copyToast.style.display = 'none'; }, 2000);
+    }).catch(() => {
+      outputEl.className = 'error-text';
+      outputEl.textContent = '⚠ Could not access clipboard. Please copy the text manually.';
+    });
+    return;
+  }
+
+  // Fallback for older browsers or non-secure contexts.
+  // document.execCommand('copy') is deprecated but used here for broad compatibility.
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.style.position = 'fixed';
+  textarea.style.top = '0';
+  textarea.style.left = '0';
+  textarea.style.opacity = '0';
+  document.body.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
+  try {
+    const successful = document.execCommand('copy');
+    document.body.removeChild(textarea);
+    if (successful) {
+      copyToast.style.display = 'inline';
+      setTimeout(() => { copyToast.style.display = 'none'; }, 2000);
+    } else {
+      outputEl.className = 'error-text';
+      outputEl.textContent = '⚠ Could not access clipboard. Please copy the text manually.';
+    }
+  } catch (e) {
+    document.body.removeChild(textarea);
     outputEl.className = 'error-text';
     outputEl.textContent = '⚠ Could not access clipboard. Please copy the text manually.';
-  });
+  }
 });
 
 btnClear.addEventListener('click', () => {
