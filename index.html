@@ -329,9 +329,18 @@ function isPlainObject(v) {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
 }
 
+// Returns the numeric "width" rank: double > long > int.
+function numericKind(n) {
+  if (!Number.isInteger(n)) return 2; // double
+  if (n > 2147483647 || n < -2147483648) return 1; // long
+  return 0; // int
+}
+
 // Merge an array of objects, using null for keys where value types conflict.
 // A null value in JSON is treated as "unknown type" and does not override an
 // already-known concrete type; once a conflict is recorded (null), it stays null.
+// Plain-object values are merged recursively; array values are unioned so that
+// all element types/properties from every occurrence are captured.
 function mergeObjects(objects) {
   const result = {};
   for (const obj of objects) {
@@ -344,6 +353,26 @@ function mergeObjects(objects) {
         if (existing === null) continue;
         // A new null value doesn't change the inferred type of an existing value.
         if (value === null) continue;
+
+        // Recursively merge plain objects to capture all nested properties.
+        if (isPlainObject(existing) && isPlainObject(value)) {
+          result[key] = mergeObjects([existing, value]);
+          continue;
+        }
+
+        // For arrays, union all elements so all item types/properties are captured.
+        if (Array.isArray(existing) && Array.isArray(value)) {
+          result[key] = existing.concat(value);
+          continue;
+        }
+
+        // For numbers, keep the value representing the wider numeric type.
+        // (result[key] is already `existing`; only update when the new value is wider.)
+        if (typeof existing === 'number' && typeof value === 'number') {
+          if (numericKind(value) > numericKind(existing)) result[key] = value;
+          continue;
+        }
+
         const sameKind =
           typeof existing === typeof value &&
           Array.isArray(existing) === Array.isArray(value);
@@ -380,10 +409,12 @@ function inferType(value, propertyName, classMap, useNullable) {
     if (value.length === 0) {
       return 'List<object>';
     }
-    // For arrays of objects, merge all items to capture all properties
-    const objItems = value.filter(el => isPlainObject(el));
-    if (objItems.length > 0) {
-      const merged = mergeObjects(objItems);
+    // For arrays of objects, merge all items to capture all properties.
+    // Only use the object-item path when every non-null element is a plain object;
+    // mixed arrays (e.g. [{a:1}, 2]) fall through to the common-type logic below.
+    const nonNullItems = value.filter(el => el !== null && el !== undefined);
+    if (nonNullItems.length > 0 && nonNullItems.every(el => isPlainObject(el))) {
+      const merged = mergeObjects(nonNullItems);
       const itemClassName = toCSharpClassName(propertyName + 'Item');
       if (!classMap.has(itemClassName)) {
         classMap.set(itemClassName, null);
@@ -392,9 +423,11 @@ function inferType(value, propertyName, classMap, useNullable) {
       }
       return `List<${itemClassName}>`;
     }
-    // Primitive items: determine a common type
+    // Primitive/mixed items: determine a common type.
+    // Plain objects in a mixed array are treated as 'object' without generating a class,
+    // since this path is only reached when the array is not uniformly plain objects.
     const itemTypes = new Set(
-      value.map(el => inferType(el, propertyName + 'Item', classMap, useNullable))
+      value.map(el => isPlainObject(el) ? 'object' : inferType(el, propertyName + 'Item', classMap, useNullable))
     );
     const itemType = itemTypes.size === 1 ? itemTypes.values().next().value : 'object';
     return `List<${itemType}>`;
