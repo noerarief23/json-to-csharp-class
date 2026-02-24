@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>JSON to C# Class Generator</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      background: #f0f4f8;
+      color: #1a202c;
+      min-height: 100vh;
+    }
+
+    header {
+      background: #1a56db;
+      color: #fff;
+      padding: 18px 32px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      box-shadow: 0 2px 8px rgba(0,0,0,.18);
+    }
+    header h1 { font-size: 1.4rem; font-weight: 700; letter-spacing: -.3px; }
+    header p  { font-size: .85rem; opacity: .82; margin-top: 2px; }
+
+    .badge {
+      margin-left: auto;
+      background: rgba(255,255,255,.18);
+      border-radius: 6px;
+      padding: 4px 10px;
+      font-size: .75rem;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+
+    main {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 24px 20px 40px;
+    }
+
+    .how-to {
+      background: #fff;
+      border-radius: 10px;
+      padding: 18px 24px;
+      margin-bottom: 22px;
+      border: 1px solid #e2e8f0;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 16px;
+    }
+    .how-to h2 { width: 100%; font-size: .95rem; color: #4a5568; margin-bottom: 4px; font-weight: 600; }
+    .step {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      flex: 1 1 200px;
+    }
+    .step-num {
+      background: #1a56db;
+      color: #fff;
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: .75rem;
+      font-weight: 700;
+      flex-shrink: 0;
+      margin-top: 1px;
+    }
+    .step p { font-size: .82rem; color: #4a5568; line-height: 1.5; }
+
+    .editor-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+      align-items: start;
+    }
+
+    @media (max-width: 760px) {
+      .editor-row { grid-template-columns: 1fr; }
+    }
+
+    .panel {
+      background: #fff;
+      border-radius: 10px;
+      border: 1px solid #e2e8f0;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .panel-header {
+      background: #f7fafc;
+      border-bottom: 1px solid #e2e8f0;
+      padding: 10px 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .panel-header span { font-size: .85rem; font-weight: 600; color: #2d3748; }
+
+    .lang-badge {
+      font-size: .7rem;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 4px;
+      text-transform: uppercase;
+      letter-spacing: .5px;
+    }
+    .lang-json { background: #fef3c7; color: #92400e; }
+    .lang-cs   { background: #dbeafe; color: #1e40af; }
+
+    textarea, #output {
+      flex: 1;
+      width: 100%;
+      min-height: 420px;
+      padding: 16px;
+      font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+      font-size: .82rem;
+      line-height: 1.6;
+      border: none;
+      outline: none;
+      resize: vertical;
+      background: #fff;
+      color: #1a202c;
+      tab-size: 4;
+    }
+
+    #output {
+      white-space: pre;
+      overflow: auto;
+      color: #1a202c;
+    }
+
+    .error-text { color: #c53030 !important; font-weight: 500; }
+
+    .controls {
+      display: flex;
+      gap: 10px;
+      margin: 16px 0;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    button {
+      cursor: pointer;
+      border: none;
+      border-radius: 7px;
+      font-size: .88rem;
+      font-weight: 600;
+      padding: 10px 22px;
+      transition: background .15s, transform .08s;
+    }
+    button:active { transform: scale(.97); }
+
+    #btn-convert {
+      background: #1a56db;
+      color: #fff;
+    }
+    #btn-convert:hover { background: #1648c0; }
+
+    #btn-copy {
+      background: #e2e8f0;
+      color: #2d3748;
+    }
+    #btn-copy:hover { background: #cbd5e0; }
+
+    #btn-clear {
+      background: #fff0f0;
+      color: #c53030;
+      border: 1px solid #fed7d7;
+    }
+    #btn-clear:hover { background: #fff5f5; }
+
+    #btn-sample {
+      background: #f0fff4;
+      color: #276749;
+      border: 1px solid #c6f6d5;
+      margin-left: auto;
+    }
+    #btn-sample:hover { background: #e6ffed; }
+
+    .options {
+      display: flex;
+      gap: 16px;
+      align-items: center;
+      font-size: .82rem;
+      color: #4a5568;
+      flex-wrap: wrap;
+    }
+    .options label { display: flex; align-items: center; gap: 6px; cursor: pointer; user-select: none; }
+    .options input[type=text] {
+      border: 1px solid #cbd5e0;
+      border-radius: 5px;
+      padding: 4px 8px;
+      font-size: .82rem;
+      width: 120px;
+      outline: none;
+    }
+    .options input[type=text]:focus { border-color: #1a56db; }
+
+    #copy-toast {
+      display: none;
+      margin-left: 8px;
+      font-size: .78rem;
+      color: #276749;
+      font-weight: 600;
+    }
+
+    footer {
+      text-align: center;
+      padding: 18px;
+      font-size: .75rem;
+      color: #718096;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>JSON → C# Class Generator</h1>
+    <p>Paste JSON, click Convert, get production-ready C# POCO classes instantly</p>
+  </div>
+  <span class="badge">🔒 Runs entirely in your browser</span>
+</header>
+
+<main>
+
+  <div class="how-to">
+    <h2>How to use</h2>
+    <div class="step">
+      <div class="step-num">1</div>
+      <p><strong>Paste JSON</strong> — REST API response, Azure service output, or any JSON object.</p>
+    </div>
+    <div class="step">
+      <div class="step-num">2</div>
+      <p><strong>Click Convert</strong> — analyzes types, generates PascalCase properties and nested classes.</p>
+    </div>
+    <div class="step">
+      <div class="step-num">3</div>
+      <p><strong>Review classes</strong> — List&lt;T&gt; for arrays, separate definitions for nested objects.</p>
+    </div>
+    <div class="step">
+      <div class="step-num">4</div>
+      <p><strong>Copy &amp; use</strong> — works directly with <code>JsonSerializer.Deserialize&lt;T&gt;</code> or <code>JsonConvert.DeserializeObject&lt;T&gt;</code>.</p>
+    </div>
+  </div>
+
+  <div class="controls">
+    <button id="btn-convert">⚡ Convert</button>
+    <button id="btn-copy">📋 Copy C#</button><span id="copy-toast">✔ Copied!</span>
+    <button id="btn-clear">✕ Clear</button>
+    <button id="btn-sample">Load Sample JSON</button>
+
+    <div class="options">
+      <label title="Name for the root C# class">Root class:
+        <input type="text" id="root-name" value="Root" maxlength="60" />
+      </label>
+      <label title="Add [JsonPropertyName] attribute above each property">
+        <input type="checkbox" id="opt-attr" />
+        Add JsonPropertyName attributes
+      </label>
+      <label title="Use nullable reference types (e.g. string?)">
+        <input type="checkbox" id="opt-nullable" />
+        Nullable reference types
+      </label>
+    </div>
+  </div>
+
+  <div class="editor-row">
+    <div class="panel">
+      <div class="panel-header">
+        <span>JSON Input</span>
+        <span class="lang-badge lang-json">JSON</span>
+      </div>
+      <textarea id="json-input" spellcheck="false" placeholder='Paste your JSON here…&#10;&#10;{&#10;  "name": "Alice",&#10;  "age": 30&#10;}'></textarea>
+    </div>
+
+    <div class="panel">
+      <div class="panel-header">
+        <span>C# Output</span>
+        <span class="lang-badge lang-cs">C#</span>
+      </div>
+      <div id="output">Click Convert to generate C# classes.</div>
+    </div>
+  </div>
+
+</main>
+
+<footer>JSON to C# Class Generator — runs 100% client-side, no data is sent to any server.</footer>
+
+<script>
+/* ===================================================================
+   JSON → C# Class Generator
+   =================================================================== */
+
+// ── Helpers ────────────────────────────────────────────────────────
+
+function toPascalCase(str) {
+  if (!str) return 'Property';
+  // handle snake_case, kebab-case, camelCase, and already PascalCase
+  return str
+    .replace(/[-_\s]+(.)/g, (_, c) => c.toUpperCase())
+    .replace(/^(.)/, c => c.toUpperCase());
+}
+
+function sanitizeIdentifier(name) {
+  // Remove characters that are not valid in C# identifiers
+  let id = name.replace(/[^a-zA-Z0-9_]/g, '_');
+  // Prefix with underscore if starts with a digit
+  if (/^\d/.test(id)) id = '_' + id;
+  if (!id) id = 'Property';
+  return id;
+}
+
+function toCSharpClassName(name) {
+  return sanitizeIdentifier(toPascalCase(name));
+}
+
+// Infer the C# type for a JSON value.
+// classMap accumulates nested class definitions keyed by class name.
+function inferType(value, propertyName, classMap, useNullable) {
+  if (value === null || value === undefined) {
+    return useNullable ? 'object?' : 'object';
+  }
+
+  const t = typeof value;
+
+  if (t === 'boolean') return 'bool';
+
+  if (t === 'number') {
+    if (!Number.isInteger(value)) return 'double';
+    return (value > 2147483647 || value < -2147483648) ? 'long' : 'int';
+  }
+
+  if (t === 'string') {
+    return useNullable ? 'string?' : 'string';
+  }
+
+  if (Array.isArray(value)) {
+    if (value.length === 0) {
+      return 'List<object>';
+    }
+    // Determine a common item type by checking all elements
+    const itemTypes = new Set(
+      value.map(el => inferType(el, propertyName + 'Item', classMap, useNullable))
+    );
+    const itemType = itemTypes.size === 1 ? itemTypes.values().next().value : 'object';
+    return `List<${itemType}>`;
+  }
+
+  if (t === 'object') {
+    const className = toCSharpClassName(propertyName);
+    // Generate the nested class if not already in classMap
+    if (!classMap.has(className)) {
+      // Add placeholder to avoid infinite recursion
+      classMap.set(className, null);
+      const def = generateClass(className, value, classMap, useNullable, false);
+      classMap.set(className, def);
+    }
+    return className;
+  }
+
+  return 'object';
+}
+
+// Generate a single C# class definition string.
+function generateClass(className, obj, classMap, useNullable, addAttr) {
+  const lines = [];
+  lines.push(`public class ${className}`);
+  lines.push('{');
+
+  for (const [key, value] of Object.entries(obj)) {
+    const propName = sanitizeIdentifier(toPascalCase(key));
+    const typeName = inferType(value, key, classMap, useNullable);
+
+    if (addAttr) {
+      lines.push(`    [JsonPropertyName("${key}")]`);
+    }
+    lines.push(`    public ${typeName} ${propName} { get; set; }`);
+  }
+
+  lines.push('}');
+  return lines.join('\n');
+}
+
+// Entry point: convert a parsed JSON object to a set of C# class strings.
+function convert(json, rootClassName, useNullable, addAttr) {
+  if (typeof json !== 'object' || json === null) {
+    throw new Error('Top-level JSON value must be an object or array of objects.');
+  }
+
+  // If root is an array, merge properties from all objects in the array
+  let rootObj = json;
+  if (Array.isArray(json)) {
+    const objects = json.filter(x => typeof x === 'object' && x !== null && !Array.isArray(x));
+    if (objects.length === 0) throw new Error('Array does not contain any objects to generate classes from.');
+    // Merge all object keys so no property is missed
+    rootObj = Object.assign({}, ...objects);
+  }
+
+  const classMap = new Map(); // name → definition string
+
+  // Generate root class (this will also populate classMap with nested classes)
+  const rootDef = generateClass(rootClassName, rootObj, classMap, useNullable, addAttr);
+  classMap.set(rootClassName, rootDef);
+
+  // Build output: nested classes first (bottom-up), root class last
+  const parts = [];
+
+  // Collect in insertion order, put root at the end
+  const entries = Array.from(classMap.entries());
+  const rootEntry = entries.find(([k]) => k === rootClassName);
+  const others = entries.filter(([k]) => k !== rootClassName);
+
+  // others (nested) first, then root
+  for (const [, def] of others) {
+    if (def) parts.push(def);
+  }
+  if (rootEntry && rootEntry[1]) parts.push(rootEntry[1]);
+
+  if (addAttr) {
+    return 'using System.Text.Json.Serialization;\n\n' + parts.join('\n\n');
+  }
+  return parts.join('\n\n');
+}
+
+// ── DOM Wiring ──────────────────────────────────────────────────────
+
+const jsonInput  = document.getElementById('json-input');
+const outputEl   = document.getElementById('output');
+const btnConvert = document.getElementById('btn-convert');
+const btnCopy    = document.getElementById('btn-copy');
+const btnClear   = document.getElementById('btn-clear');
+const btnSample  = document.getElementById('btn-sample');
+const rootNameEl = document.getElementById('root-name');
+const optAttr    = document.getElementById('opt-attr');
+const optNullable = document.getElementById('opt-nullable');
+const copyToast  = document.getElementById('copy-toast');
+
+function doConvert() {
+  outputEl.className = '';
+  const raw = jsonInput.value.trim();
+  if (!raw) {
+    outputEl.textContent = 'Please paste JSON into the input panel.';
+    return;
+  }
+
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (e) {
+    outputEl.className = 'error-text';
+    outputEl.textContent = '⚠ Invalid JSON: ' + e.message;
+    return;
+  }
+
+  const rootName = sanitizeIdentifier(toPascalCase(rootNameEl.value.trim() || 'Root'));
+
+  try {
+    const result = convert(parsed, rootName, optNullable.checked, optAttr.checked);
+    outputEl.textContent = result;
+  } catch (e) {
+    outputEl.className = 'error-text';
+    outputEl.textContent = '⚠ ' + e.message;
+  }
+}
+
+btnConvert.addEventListener('click', doConvert);
+
+btnCopy.addEventListener('click', () => {
+  const text = outputEl.textContent;
+  if (!text || outputEl.classList.contains('error-text')) return;
+  navigator.clipboard.writeText(text).then(() => {
+    copyToast.style.display = 'inline';
+    setTimeout(() => { copyToast.style.display = 'none'; }, 2000);
+  }).catch(() => {
+    outputEl.className = 'error-text';
+    outputEl.textContent = '⚠ Could not access clipboard. Please copy the text manually.';
+  });
+});
+
+btnClear.addEventListener('click', () => {
+  jsonInput.value = '';
+  outputEl.className = '';
+  outputEl.textContent = 'Click Convert to generate C# classes.';
+});
+
+const SAMPLE_JSON = `{
+  "id": 1,
+  "name": "Alice Smith",
+  "email": "alice@example.com",
+  "isActive": true,
+  "score": 9.5,
+  "address": {
+    "street": "123 Main St",
+    "city": "Springfield",
+    "zipCode": "12345"
+  },
+  "tags": ["developer", "designer"],
+  "orders": [
+    {
+      "orderId": 1001,
+      "product": "Laptop",
+      "quantity": 1,
+      "price": 1299.99
+    }
+  ]
+}`;
+
+btnSample.addEventListener('click', () => {
+  jsonInput.value = SAMPLE_JSON;
+  doConvert();
+});
+
+// Allow Ctrl+Enter to convert
+jsonInput.addEventListener('keydown', e => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') doConvert();
+});
+</script>
+</body>
+</html>
